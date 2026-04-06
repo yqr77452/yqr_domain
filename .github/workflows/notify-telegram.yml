@@ -4,7 +4,6 @@
     push:
       paths:
         - 'reports/**.md'
-        - 'horoscope/**.md'
 
   jobs:
     notify:
@@ -13,42 +12,38 @@
         FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       steps:
         - uses: actions/checkout@v4
-        - name: Send to Telegram
+        - name: Send war report then horoscope with 5min delay
           env:
             TG_TOKEN: ${{ secrets.TG_TOKEN }}
             TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-            SHA: ${{ github.sha }}
           run: |
             python3 << 'EOF'
-            import urllib.request, json, os, subprocess, glob
-
-            sha = os.environ['SHA']
-            result = subprocess.run(
-                ['git', 'diff-tree', '--no-commit-id', '-r', '--name-only', sha],
-                capture_output=True, text=True
-            )
-            files = [f for f in result.stdout.strip().split('\n') if f.startswith('reports/')]
-
-            if not files:
-                all_files = sorted(glob.glob('reports/*.md'))
-                files = [all_files[-1]] if all_files else []
-
-            if not files:
-                print("No report found")
-                exit(0)
-
-            with open(files[0], encoding='utf-8') as f:
-                text = f.read()
+            import urllib.request, json, os, glob, time
 
             token = os.environ['TG_TOKEN']
             chat_id = os.environ['TG_CHAT_ID']
 
-            for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
-                data = json.dumps({'chat_id': chat_id, 'text': chunk}).encode()
-                req = urllib.request.Request(
-                    f'https://api.telegram.org/bot{token}/sendMessage',
-                    data=data, headers={'Content-Type': 'application/json'}
-                )
-                print('Sent:', urllib.request.urlopen(req).status)
-            EOF
+            def send(text):
+                for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
+                    data = json.dumps({'chat_id': chat_id, 'text': chunk}).encode()
+                    req = urllib.request.Request(
+                        f'https://api.telegram.org/bot{token}/sendMessage',
+                        data=data, headers={'Content-Type': 'application/json'}
+                    )
+                    print('Sent:', urllib.request.urlopen(req).status)
 
+            war_files = sorted(glob.glob('reports/*.md'))
+            if war_files:
+                with open(war_files[-1], encoding='utf-8') as f:
+                    send(f.read())
+                print('War report sent')
+
+            print('Waiting 30 seconds before horoscope...')
+            time.sleep(30)
+
+            h_files = sorted(glob.glob('horoscope/*.md'))
+            if h_files:
+                with open(h_files[-1], encoding='utf-8') as f:
+                    send(f.read())
+                print('Horoscope sent')
+            EOF
