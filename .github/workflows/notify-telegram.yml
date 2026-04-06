@@ -1,37 +1,53 @@
-  name: Notify Telegram                                                                                                                                   
-                                                                                                                                                          
-  on:                                                                                                                                                   
+  name: Notify Telegram
+
+  on:
     push:
-      paths:                                                                                                                                              
-        - 'reports/**.md'                                                                                                                                 
-                                                                                                                                                          
-  jobs:                                                                                                                                                   
-    notify:                                                                                                                                               
-      runs-on: ubuntu-latest                                                                                                                            
+      paths:
+        - 'reports/**.md'
+
+  jobs:
+    notify:
+      runs-on: ubuntu-latest
+      env:
+        FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       steps:
         - uses: actions/checkout@v4
-        - name: Get report content                                                                                                                        
-          id: report                                                                                                                                      
-          run: |                                                                                                                                          
-            FILE=$(git diff-tree --no-commit-id -r --name-only ${{ github.sha }} | grep reports/)                                                         
-            echo "content<<EOF" >> $GITHUB_OUTPUT                                                                                                         
-            cat "$FILE" >> $GITHUB_OUTPUT                                                                                                                 
-            echo "EOF" >> $GITHUB_OUTPUT                                                                                                                  
-        - name: Send to Telegram                                                                                                                          
-          run: |                                                                                                                                          
-            python3 -c "                                                                                                                                  
-            import urllib.request, json, os                                                                                                               
-            token = os.environ['TG_TOKEN']                                                                                                                
-            chat_id = os.environ['TG_CHAT_ID']                                                                                                            
-            text = os.environ['REPORT']                                                                                                                   
-            chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]                                                                                  
-            for chunk in chunks:                                                                                                                          
-                data = json.dumps({'chat_id': chat_id, 'text': chunk}).encode()                                                                           
-                req = urllib.request.Request(f'https://api.telegram.org/bot{token}/sendMessage', data=data, headers={'Content-Type':'application/json'})  
-                urllib.request.urlopen(req)                                                                                                               
-            print('sent')                                                                                                                                 
-            "                                                                                                                                             
-          env:                                                                                                                                            
-            TG_TOKEN: ${{ secrets.TG_TOKEN }}                                                                                                             
-            TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}                                                                                                         
-            REPORT: ${{ steps.report.outputs.content }}  
+        - name: Send to Telegram
+          env:
+            TG_TOKEN: ${{ secrets.TG_TOKEN }}
+            TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+            SHA: ${{ github.sha }}
+          run: |
+            python3 << 'EOF'
+            import urllib.request, json, os, subprocess, glob
+
+            sha = os.environ['SHA']
+            result = subprocess.run(
+                ['git', 'diff-tree', '--no-commit-id', '-r', '--name-only', sha],
+                capture_output=True, text=True
+            )
+            files = [f for f in result.stdout.strip().split('\n') if f.startswith('reports/')]
+
+            if not files:
+                all_files = sorted(glob.glob('reports/*.md'))
+                files = [all_files[-1]] if all_files else []
+
+            if not files:
+                print("No report found")
+                exit(0)
+
+            with open(files[0], encoding='utf-8') as f:
+                text = f.read()
+
+            token = os.environ['TG_TOKEN']
+            chat_id = os.environ['TG_CHAT_ID']
+
+            for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
+                data = json.dumps({'chat_id': chat_id, 'text': chunk}).encode()
+                req = urllib.request.Request(
+                    f'https://api.telegram.org/bot{token}/sendMessage',
+                    data=data, headers={'Content-Type': 'application/json'}
+                )
+                print('Sent:', urllib.request.urlopen(req).status)
+            EOF
+
